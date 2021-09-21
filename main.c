@@ -9,6 +9,7 @@
 #define CAN_PIN_PORTA
 #define HELLO_BRUNCH				222
 
+#define GGG							1
 #define DELETE_HELLO_MAIN			0xFF
 #define CHECK_HELLO_MAIN			0xBB
 //#define CAN_PIN_PORTB
