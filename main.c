@@ -11,6 +11,8 @@
 
 #define DELETE_HELLO_MAIN			0xFF
 #define CREATE_HELLO_MAIN			0xAA
+#define CHECK_HELLO_MAIN			0xBB
+
 //#define CAN_PIN_PORTB
 
 #define CAN_Id_Standard             ((uint32_t)0x00000000)  /*!< Standard Id */
