@@ -23,6 +23,7 @@
 #define PAGE_PROG    				2
 #define BOOT    					3
 
+
 // Flash configuration
 #define MAIN_PROGRAM_START_ADDRESS 	(uint32_t)0x08001000
 #define MAIN_PROGRAM_PAGE_NUMBER 	2
