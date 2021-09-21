@@ -7,6 +7,7 @@
 																											//STM32F072CB - 63
 #define HELLO_MAIN					111
 #define CAN_PIN_PORTA
+#define HELLO_BRUNCH				222
 //#define CAN_PIN_PORTB
 
 #define CAN_Id_Standard             ((uint32_t)0x00000000)  /*!< Standard Id */
