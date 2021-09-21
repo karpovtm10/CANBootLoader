@@ -15,6 +15,7 @@
 
 //#define CAN_PIN_PORTB
 
+
 #define CAN_Id_Standard             ((uint32_t)0x00000000)  /*!< Standard Id */
 #define CAN_Id_Extended             ((uint32_t)0x00000004)  /*!< Extended Id */
 
