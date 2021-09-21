@@ -5,6 +5,7 @@
 																											//STM32F042F6 - 31
 																											//STM32F072C8 - 31
 																											//STM32F072CB - 63
+#define HELLO_MAIN					111
 #define CAN_PIN_PORTA
 //#define CAN_PIN_PORTB
 
