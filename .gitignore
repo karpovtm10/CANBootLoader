@@ -1,15 +1,9 @@
 # Object file
 *.o
+
 *.crf
 *.axf
 *.htm
+*.htm
 *.dep
-*.uvguix.karpov_vv
-# Ada Library Information
-*.ali
-MDK-ARM/obj/main.crf
-MDK-ARM/obj/project.axf
-MDK-ARM/obj/project.build_log.htm
-MDK-ARM/obj/project.htm
-MDK-ARM/obj/project_Project.dep
-MDK-ARM/project.uvguix.karpov_vv
+*.karpov_vv
