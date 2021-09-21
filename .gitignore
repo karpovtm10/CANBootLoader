@@ -1,8 +1,12 @@
 # Object file
 *.o
+# CRF
 *.crf
+# AXF
 *.axf
+# HTM
 *.htm
-*.htm
+# DEP
 *.dep
+# KARPOV
 *.karpov_vv
