@@ -10,7 +10,6 @@
 
 
 
-
 #define GGG							1
 #define DELETE_HELLO_MAIN			0xFF
 #define CREATE_HELLO_MAIN			0xAA
