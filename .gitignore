@@ -1,6 +1,5 @@
 # Object file
 *.o
-
 *.crf
 *.axf
 *.htm
