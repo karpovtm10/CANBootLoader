@@ -10,3 +10,5 @@
 *.dep
 # KARPOV
 *.karpov_vv
+# map
+*.map
