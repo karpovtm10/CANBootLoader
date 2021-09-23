@@ -3,11 +3,8 @@
 #define DEVICE_CAN_ID				0x703U //0x701 - ðàìà, 0x702 - ñòðåëà, 0x703 - îòâàë
 #define NUM_OF_PAGES				31 //Êîëè÷åñòâî ñòðàíèö â ÌÊ 	STM32F042F4 - 15
 																											//STM32F042F6 - 31
-
-#define suka		0x01																											//STM32F072C8 - 31
-
-#define blya						0x02																											//STM32F072C8 - 31
-
+																											//STM32F072C8 - 31
+																											//STM32F072C8 - 31
 																											//STM32F072CB - 63
 #define CAN_PIN_PORTA
 
