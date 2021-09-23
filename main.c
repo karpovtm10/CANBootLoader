@@ -1,11 +1,11 @@
 #include "stm32f0xx.h"
 
-#define DEVICE_CAN_ID				0x703U //0x701 - ðàìà, 0x702 - ñòðåëà, 0x703 - îòâàë
-#define NUM_OF_PAGES				31 //Êîëè÷åñòâî ñòðàíèö â ÌÊ 	STM32F042F4 - 15
-																											//STM32F042F6 - 31
-																											//STM32F072C8 - 31
-																											//STM32F072C8 - 31
-																											//STM32F072CB - 63
+#define DEVICE_CAN_ID				0x703U 	// 0x701 - рама, 0x702 - стрела, 0x703 - отвал
+#define NUM_OF_PAGES				31 		// Количество страниц в МК	STM32F042F4 - 15
+																	//	STM32F042F6 - 31
+																	//	STM32F072C8 - 31
+																	//	STM32F072C8 - 31
+																	//	STM32F072CB - 63
 #define CAN_PIN_PORTA
 
 //#define CAN_PIN_PORTB
@@ -598,7 +598,7 @@ void CEC_CAN_IRQHandler(void)
 		case CMD_PAGE_PROG:
 							if (blState == IDLE) 
 							{
-								clear_Buffer(PageBuffer, countof(PageBuffer)); //çàïîëíåíèÿ ìàññèâà íóëÿìè
+								clear_Buffer(PageBuffer, countof(PageBuffer)); // Заполнение страницы нулями
 								PageCRC = CAN_RX.Data[5] << 24 | CAN_RX.Data[4] << 16 | CAN_RX.Data[3] << 8 | CAN_RX.Data[2];
 								PageIndex = CAN_RX.Data[1];
 								blState = PAGE_PROG;
