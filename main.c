@@ -3,19 +3,11 @@
 #define DEVICE_CAN_ID				0x703U //0x701 - рама, 0x702 - стрела, 0x703 - отвал
 #define NUM_OF_PAGES				31 //Количество страниц в МК 	STM32F042F4 - 15
 																											//STM32F042F6 - 31
-																											//STM32F072C8 - 31
+#define suka		0x01																											//STM32F072C8 - 31
 																											//STM32F072CB - 63
 #define CAN_PIN_PORTA
-#define BYE_BRANCH					222
-
-
-#define GGG							1
-#define DELETE_HELLO_MAIN			0xFF
-#define CREATE_HELLO_MAIN			0xAA
-#define CHECK_HELLO_MAIN			0xBB
 
 //#define CAN_PIN_PORTB
-
 
 #define CAN_Id_Standard             ((uint32_t)0x00000000)  /*!< Standard Id */
 #define CAN_Id_Extended             ((uint32_t)0x00000004)  /*!< Extended Id */
