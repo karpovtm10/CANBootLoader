@@ -1,5 +1,5 @@
 #include "stm32f0xx.h"
-
+#include <stdio.h> 
 #define DEVICE_CAN_ID				0x703U 	// 0x701 - рама, 0x702 - стрела, 0x703 - отвал
 #define NUM_OF_PAGES				31 		// Количество страниц в МК	STM32F042F4 - 15
 																	//	STM32F042F6 - 31
@@ -41,8 +41,12 @@
 
 #define countof(a)					(uint8_t)(sizeof(a) / sizeof(*(a)))
 	
+uint8_t search = 0, search_ARROW = 0, ready_to_send = 0, search_RECEIVE1 = 0, RECEIVE1 = 0, command = 0xFF, search_COMMAND = 0, search_PAGE = 0, PAGE_wait = 0;
+uint8_t size_of_Page_arr[5], size_of_Page_parcel_cnt = 0, crc_cnt = 0;
+uint16_t  size_of_Page = 0, received_Page_bytes = 0, Page_buf_cnt = 0;
+	
 volatile	uint32_t 				ticks_delay = 0;
-volatile 	uint8_t 				CAN_TX_Data[8];
+volatile 	uint8_t 				Data_CRC[5];
 uint8_t              				PageBuffer[FLASH_PAGE_SIZE];
 volatile 	int                 	PageBufferPtr;
 volatile 	uint8_t             	PageIndex;
@@ -61,38 +65,74 @@ typedef enum
 	FLASH_TIMEOUT
 }FLASH_Status;
 
-typedef struct
-{
-	uint32_t StdId;
-	uint32_t ExtId;
-	uint8_t IDE;
-	uint8_t Data[8];
-	uint32_t DLC;
-} CanRxMsg;
-
-CanRxMsg CAN_RX;
-
-typedef struct
-{
-	uint32_t StdId; 
-	uint32_t ExtId; 
-	uint8_t IDE;
-	uint8_t Data[8];
-} CanTxMsg;
-
-CanTxMsg CAN_TX;
-
+void Configure_USART1(void);
+void Configure_GPIO_USART1(void);
 void Init_RCC(void);
-void ConfigureGPIO(void);
-void Configure_GPIO_CAN(void);
-void Configure_CAN(void);
-void CAN_Transmit(void);
 void delay_ms(uint32_t milliseconds);
 void Remap_pin(void);
 void CRC_Init(void);
 uint32_t CRC_Calculate(uint32_t pBuffer[], uint32_t BufferLength);
 void DeInit(void);
 void JumpToApplication(void);
+void FLASH_Unlock(void);
+void copy_Buffer(uint8_t *dst, uint8_t *src, uint16_t size);
+void clear_Buffer(uint8_t *BUFER, uint16_t size);
+FLASH_Status FLASH_ProgramWord(uint32_t Address, uint32_t Data);
+FLASH_Status FLASH_ErasePage(uint32_t Page_Address);
+const char char_map[10] =																		// Карта
+{
+	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+};
+uint8_t negative_flag;
+uint8_t ies;
+uint8_t char_cnt;
+volatile uint16_t number1;
+uint16_t char_to_int (char *cti)													// Функция перевода из строки в число
+{
+	negative_flag = 0;
+	ies = 0;
+	number1 = 0;
+	char_cnt = 0;
+
+	while (cti[char_cnt] != 0)
+	{
+		for (ies = 0; ies < 10; ies++)
+		{
+			if (cti[0] == '-') negative_flag = 1;
+			if (cti[char_cnt] == char_map[ies]) 
+			{
+				number1 = number1 * 10 + ies ;
+				break;
+			}
+		}
+		char_cnt++;
+	}
+	
+	if (negative_flag) number1 *= -1;
+	
+	return number1;
+}
+
+void send_Uart(USART_TypeDef* USARTx, uint8_t c)                				// Отправка симовла по USART, GPS
+{
+    while((USART1->ISR & USART_ISR_TC) == USART_ISR_TC);
+    USART1->TDR = c;
+}
+char print_buffer[30];
+void TransmitResponsePacket(char *s)           					// Отправка строки AT команд
+{
+	uint8_t i = 0;
+	clear_Buffer((uint8_t *)print_buffer, countof(print_buffer));
+	sprintf(print_buffer, "AT+CIPSEND=1,4\r");
+	while (print_buffer[i] != 0) send_Uart(USART1, print_buffer[i++]);
+	while (!ready_to_send) continue;
+	
+	ready_to_send = 0;
+	delay_ms(50);
+    while (*s != 0) send_Uart(USART1, *s++);
+	delay_ms(50);
+	USART1->ICR |= USART_ICR_TCCF;
+}
 
 int main(void)
 {
@@ -100,8 +140,8 @@ int main(void)
 	Init_RCC();
 	Remap_pin();
 
-	Configure_GPIO_CAN();
-	Configure_CAN();
+	Configure_GPIO_USART1();
+	Configure_USART1();
 	CRC_Init();
 	
 	delay_ms(500);
@@ -113,6 +153,88 @@ int main(void)
 	
 	while (1)
 	{
+		
+		switch(command)
+		{
+			case CMD_HOST_INIT:
+								blState = IDLE;
+								TransmitResponsePacket("$OK1");
+								delay_ms(500);
+			break;
+
+			case CMD_PAGE_PROG:
+								if (blState == IDLE) 
+								{
+									clear_Buffer(PageBuffer, countof(PageBuffer)); // Заполнение страницы нулями
+									PageCRC = Data_CRC[4] << 24 | Data_CRC[3] << 16 | Data_CRC[2] << 8 | Data_CRC[1];
+									PageIndex = Data_CRC[0];
+									blState = PAGE_PROG;
+									PageBufferPtr = 0;
+									TransmitResponsePacket("$OK2");
+								} 
+								else 
+								{
+								// Should never get here
+								}
+			break;
+
+			case CMD_BOOT:
+								TransmitResponsePacket("$OK3");
+								blState = BOOT;
+
+			break;
+
+			default:
+			break;
+		}
+		
+		if (blState == PAGE_PROG)
+		{
+//			copy_Buffer(&PageBuffer[PageBufferPtr], CAN_RX.Data, CAN_RX.DLC);
+//			PageBufferPtr += CAN_RX.DLC;
+
+			if (PageBufferPtr == FLASH_PAGE_SIZE) 
+			{
+				NVIC_DisableIRQ(USART1_IRQn);
+					
+				uint32_t crc = CRC_Calculate((uint32_t*)PageBuffer, FLASH_PAGE_SIZE / 4);
+
+				if (PageIndex <= NUM_OF_FREE_PAGES)
+				{
+					
+					if (crc == PageCRC)
+					{
+						FLASH_Unlock();
+
+						FLASH_ErasePage(MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE);
+
+						for (int i = 0; i < FLASH_PAGE_SIZE; i += 4)
+						{
+							FLASH_ProgramWord(MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE + i, *(uint32_t*)&PageBuffer[i]);
+						}
+
+						FLASH->CR |= FLASH_CR_LOCK;
+
+						TransmitResponsePacket("$OK2");
+					}
+					else 
+					{
+						TransmitResponsePacket("$ER1");
+					}
+				}
+				else
+				{
+					TransmitResponsePacket("$ER2");
+				}
+
+				blState = IDLE;
+
+				NVIC_EnableIRQ(USART1_IRQn);
+			}
+		}
+
+		
+		
 		if (blState == BOOT) 
 		{
 			delay_ms(50);
@@ -139,13 +261,6 @@ __INLINE void JumpToApplication(void)
 	__set_MSP(*(__IO uint32_t*) MAIN_PROGRAM_START_ADDRESS);
 	DeInit();
 	JumpAddress();
-}
-
-void TransmitResponsePacket(uint8_t response)
-{
-	CAN_TX_Data[0] = response;
-	
-	CAN_Transmit();	
 }
 
 __INLINE void FLASH_Unlock(void)
@@ -356,52 +471,6 @@ __INLINE void Init_RCC(void)
 	RCC->CFGR |= RCC_CFGR_PPRE_DIV2;	
 }
 
-void CAN_Transmit(void)
-{
-	if((CAN->TSR & CAN_TSR_TME0) == CAN_TSR_TME0)/* check mailbox 0 is empty */
-	{
-		CAN->sTxMailBox[0].TDTR = 8; /* fill data length = 1 */
-		
-		CAN->sTxMailBox[0].TDLR = (	((uint32_t)CAN_TX_Data[3] << 24) | 
-									((uint32_t)CAN_TX_Data[2] << 16) |
-									((uint32_t)CAN_TX_Data[1] << 8) | 
-									((uint32_t)CAN_TX_Data[0]));
-		CAN->sTxMailBox[0].TDHR = (	((uint32_t)CAN_TX_Data[7] << 24) | 
-									((uint32_t)CAN_TX_Data[6] << 16) |
-									((uint32_t)CAN_TX_Data[5] << 8) |
-									((uint32_t)CAN_TX_Data[4]));
-		
-		CAN->sTxMailBox[0].TIR = (uint32_t)(DEVICE_CAN_TX_ID << 21 | CAN_TI0R_TXRQ); /* fill Id field and request a transmission */
-	}
-	else
-	{
-		CAN->TSR |= CAN_TSR_ABRQ0; /* abort transmission if not empty */
-	}	
-}
-
-void CAN_Receive(CanRxMsg* RxMessage)
-{
-	RxMessage->IDE = (uint8_t)0x04 & CAN->sFIFOMailBox[0].RIR;
-
-	if (RxMessage->IDE == CAN_Id_Standard)
-		RxMessage->StdId = (uint32_t)0x000007FF & (CAN->sFIFOMailBox[0].RIR >> 21);
-	else if (RxMessage->IDE == CAN_Id_Extended)
-		RxMessage->ExtId = (uint32_t)0x1FFFFFFF & (CAN->sFIFOMailBox[0].RIR >> 3);
-
-	RxMessage->DLC = (uint8_t)0x0F & CAN->sFIFOMailBox[0].RDTR;
-
-	RxMessage->Data[0] = (uint8_t)0xFF & CAN->sFIFOMailBox[0].RDLR;
-	RxMessage->Data[1] = (uint8_t)0xFF & (CAN->sFIFOMailBox[0].RDLR >> 8);
-	RxMessage->Data[2] = (uint8_t)0xFF & (CAN->sFIFOMailBox[0].RDLR >> 16);
-	RxMessage->Data[3] = (uint8_t)0xFF & (CAN->sFIFOMailBox[0].RDLR >> 24);
-	RxMessage->Data[4] = (uint8_t)0xFF & CAN->sFIFOMailBox[0].RDHR;
-	RxMessage->Data[5] = (uint8_t)0xFF & (CAN->sFIFOMailBox[0].RDHR >> 8);
-	RxMessage->Data[6] = (uint8_t)0xFF & (CAN->sFIFOMailBox[0].RDHR >> 16);
-	RxMessage->Data[7] = (uint8_t)0xFF & (CAN->sFIFOMailBox[0].RDHR >> 24);
-
-	CAN->RF0R |= CAN_RF0R_RFOM0; /* release FIFO */
-}
-
 __INLINE void Configure_GPIO_CAN(void)
 {
 	#if defined(CAN_PIN_PORTA)
@@ -424,52 +493,41 @@ __INLINE void Configure_GPIO_CAN(void)
 	#endif	
 }
 
-__INLINE void Configure_CAN(void)
+__INLINE void Configure_GPIO_USART1(void)
 {
-	/* Enable the peripheral clock CAN */
-	RCC->APB1ENR |= RCC_APB1ENR_CANEN;
+	/* Enable the peripheral clock of GPIOA */
+	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
-	/* Configure CAN */
-	/* (1) Enter CAN init mode to write the configuration */
-	/* (2) Wait the init mode entering */
-	/* (3) Exit sleep mode */
-	/* (4) Loopback mode, set timing to 1Mb/s: BS1 = 4, BS2 = 3, prescaler = 6 */
-	/* (5) Leave init mode */
-	/* (6) Wait the init mode leaving */
-	/* (7) Enter filter init mode, (16-bit + mask, filter 0 for FIFO 0) */
-	/* (8) Acivate filter 0 */
-	/* (9) Identifier list mode */
-	/* (12) Leave filter init */
-	/* (13) Set FIFO0 message pending IT enable */
-	CAN->MCR |= CAN_MCR_INRQ; /* (1) */
-	while((CAN->MSR & CAN_MSR_INAK)!=CAN_MSR_INAK) /* (2) */
-	{ 
-	/* add time out here for a robust application */
-	}
-	CAN->MCR |= CAN_MCR_ABOM;
-	CAN->MCR &=~ CAN_MCR_SLEEP; /* (3) */
-	CAN->BTR = 0;
-	CAN->BTR |= 3 << 20 | 2 << 16 | 11 << 0; /* (4) */ 
-	CAN->MCR &=~ CAN_MCR_INRQ; /* (5) */
-	while((CAN->MSR & CAN_MSR_INAK)==CAN_MSR_INAK) /* (6) */
-	{ 
-	/* add time out here for a robust application */
-	}  
-	CAN->FMR = CAN_FMR_FINIT; /* (7) */ 
-	CAN->FA1R = CAN_FA1R_FACT0; /* (8) */
+	/* GPIO configuration for USART1 signals */
+	/* (1) Select AF mode (10) on PA9 and PA10 */
+	/* (2) AF1 for USART1 signals */
+	GPIOA->MODER = (GPIOA->MODER & ~(GPIO_MODER_MODER9|GPIO_MODER_MODER10))\
+					| (GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1); /* (1) */
+	GPIOA->AFR[1] = (GPIOA->AFR[1] &~ (GPIO_AFRH_AFRH1 | GPIO_AFRH_AFRH2))\
+					| (1 << (1 * 4)) | (1 << (2 * 4)); /* (2) */
+}
 
-	CAN->FM1R = CAN_FM1R_FBM0; /* (9) */
-	CAN->sFilterRegister[0].FR1 = 0 << 5 | DEVICE_CAN_ID << (16+5); /* (10) */ 
+/**
+  * @brief  This function configures USART1.
+  * @param  None
+  * @retval None
+  */
+__INLINE void Configure_USART1(void)
+{
+	/* Enable the peripheral clock USART1 */
+	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
 
-
-	CAN->FMR &=~ CAN_FMR_FINIT; /* (12) */
-	CAN->IER |= CAN_IER_FMPIE0; /* (13) */
+	/* Configure USART1 */
+	/* (1) oversampling by 16, 9600 baud */
+	/* (2) 8 data bit, 1 start bit, 1 stop bit, no parity, reception mode */
+	USART1->BRR = 480000 / 96; /* (1) */
+	USART1->CR1 = USART_CR1_RXNEIE | USART_CR1_RE | USART_CR1_UE; /* (2) */
 
 	/* Configure IT */
-	/* (14) Set priority for CAN_IRQn */
-	/* (15) Enable CAN_IRQn */
-	NVIC_SetPriority(CEC_CAN_IRQn, 0); /* (16) */
-	NVIC_EnableIRQ(CEC_CAN_IRQn); /* (17) */
+	/* (3) Set priority for USART1_IRQn */
+	/* (4) Enable USART1_IRQn */
+	NVIC_SetPriority(USART1_IRQn, 0); /* (3) */
+	NVIC_EnableIRQ(USART1_IRQn); /* (4) */
 }
 
 void clear_Buffer(uint8_t *BUFER, uint16_t size)
@@ -532,91 +590,129 @@ void SysTick_Handler(void)
 	ticks_delay++;
 }
 
-void CEC_CAN_IRQHandler(void)
+void USART1_IRQHandler(void)
 {
-	CAN_Receive(&CAN_RX);
+	uint8_t chartoreceive = 0;
 
-	if (CAN_RX.StdId != DEVICE_CAN_ID) 
+	if((USART1->ISR & USART_ISR_RXNE) == USART_ISR_RXNE)
 	{
-		return;
-	}
-
-	if (blState == PAGE_PROG)
-	{
-		copy_Buffer(&PageBuffer[PageBufferPtr], CAN_RX.Data, CAN_RX.DLC);
-		PageBufferPtr += CAN_RX.DLC;
+		chartoreceive = (uint8_t)(USART1->RDR); /* Receive data, clear flag */
 		
-		if (PageBufferPtr == FLASH_PAGE_SIZE) 
+		// Идентификатор посылки от 0 сервера
+		switch (chartoreceive)
 		{
-			NVIC_DisableIRQ(CEC_CAN_IRQn);
-				
-			uint32_t crc = CRC_Calculate((uint32_t*)PageBuffer, FLASH_PAGE_SIZE / 4);
-
-			if (PageIndex <= NUM_OF_FREE_PAGES)
+			case '$' : search++; break;
+			case 'F' : search == 1 ? (search++) : (search = 0); break;
+			case 'W' : search == 2 ? (search++) : (search = 0); break;
+			
+			default: search = 0;
+		}
+		if (search == 3) 
+		{ 
+			command = 0x01;	
+			search = 0;			
+		}
+		
+		if (command == 0x00)
+		{
+			Data_CRC[crc_cnt++] = chartoreceive;
+			if (crc_cnt == 0x05)
 			{
-				
-				if (crc == PageCRC)
-				{
-					FLASH_Unlock();
+				command = CMD_PAGE_PROG;
+				crc_cnt = 0;
+			}
+		}
+		
+		if (search_COMMAND == 2) 
+		{ 
+			command = chartoreceive;	
+			search_COMMAND = 0;			
+		}
+		
+		switch (chartoreceive)
+		{
+			case '$' : search_COMMAND++; break;
+			case 'C' : search_COMMAND == 1 ? (search_COMMAND++) : (search_COMMAND = 0); break;
+			
+			default: search_COMMAND = 0;
+		}
 
-					FLASH_ErasePage(MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE);
+		
+		// Идентификатор хорошего ответа
+		switch (chartoreceive)
+		{
+			case '>' : search_ARROW++; break;
+			case ' ' : search_ARROW == 1 ? (search_ARROW++) : (search_ARROW = 0); break;
+			
+			default: search_ARROW = 0;
+		}
+		if (search_ARROW == 2) 
+		{
+			ready_to_send = 1;
+			search_ARROW = 0;
+		}
+		// ************************************
 
-					for (int i = 0; i < FLASH_PAGE_SIZE; i += 4)
-					{
-						FLASH_ProgramWord(MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE + i, *(uint32_t*)&PageBuffer[i]);
-					}
+		if (RECEIVE1)
+		{
 
-					FLASH->CR |= FLASH_CR_LOCK;
-
-					TransmitResponsePacket(CAN_RESP_OK);
-				}
-				else 
-				{
-					TransmitResponsePacket(CAN_RESP_ERROR_CRC);
-				}
+			if (chartoreceive != ':' && size_of_Page_parcel_cnt < 4) 
+			{
+				size_of_Page_arr[size_of_Page_parcel_cnt++] = chartoreceive;		
 			}
 			else
 			{
-				TransmitResponsePacket(CAN_RESP_ERROR_Memory);
+				size_of_Page = char_to_int((char *)size_of_Page_arr);
+				if (size_of_Page > FLASH_PAGE_SIZE)
+				{
+					size_of_Page = 0;
+				}
+				RECEIVE1 = 0;
+				size_of_Page_parcel_cnt = 0;
+				clear_Buffer(size_of_Page_arr, 4);
 			}
-
-			blState = IDLE;
-
-			NVIC_EnableIRQ(CEC_CAN_IRQn);
+				
 		}
-	CAN_Receive(&CAN_RX);
-	return;
-	}
-
-	switch(CAN_RX.Data[0])
-	{
-		case CMD_HOST_INIT:
-							blState = IDLE;
-							TransmitResponsePacket(CAN_RESP_OK);
-		break;
 		
-		case CMD_PAGE_PROG:
-							if (blState == IDLE) 
-							{
-								clear_Buffer(PageBuffer, countof(PageBuffer)); // Заполнение страницы нулями
-								PageCRC = CAN_RX.Data[5] << 24 | CAN_RX.Data[4] << 16 | CAN_RX.Data[3] << 8 | CAN_RX.Data[2];
-								PageIndex = CAN_RX.Data[1];
-								blState = PAGE_PROG;
-								PageBufferPtr = 0;
-							} 
-							else 
-							{
-							// Should never get here
-							}
-		break;
+		if (size_of_Page)
+		{
+			received_Page_bytes++;
+			if (received_Page_bytes > 3)
+			{
+				PageBuffer[Page_buf_cnt++] = chartoreceive;
+				
+			}
+					
+			if (Page_buf_cnt == size_of_Page)
+			{
+				PageBufferPtr = Page_buf_cnt;
+				size_of_Page = 0;
+				Page_buf_cnt = 0;
+				received_Page_bytes = 0;
+			}
+		}
 		
-		case CMD_BOOT:
-							TransmitResponsePacket(CAN_RESP_OK);
-							blState = BOOT;
-	  
-		break;
-		
-		default:
-		break;
+		if (blState == PAGE_PROG)
+		{
+			// Идентификатор посылки от 0 сервера
+			switch (chartoreceive)
+			{
+				case '+' : search_RECEIVE1++; break;
+				case 'R' : search_RECEIVE1 == 1 ? (search_RECEIVE1++) : (search_RECEIVE1 = 0); break;
+				case 'E' : search_RECEIVE1 == 2 || search_RECEIVE1 == 4 || search_RECEIVE1 == 7 ? (search_RECEIVE1++) : (search_RECEIVE1 = 0); break;
+				case 'C' : search_RECEIVE1 == 3 ? (search_RECEIVE1++) : (search_RECEIVE1 = 0); break;
+				case 'I' : search_RECEIVE1 == 5 ? (search_RECEIVE1++) : (search_RECEIVE1 = 0); break;
+				case 'V' : search_RECEIVE1 == 6 ? (search_RECEIVE1++) : (search_RECEIVE1 = 0); break;
+				case ',' : search_RECEIVE1 == 8 || search_RECEIVE1 == 10 ? (search_RECEIVE1++) : (search_RECEIVE1 = 0); break;
+				case '1' : search_RECEIVE1 == 9 ? (search_RECEIVE1++) : (search_RECEIVE1 = 0); break;
+				
+				default: search_RECEIVE1 = 0;
+			}
+			if (search_RECEIVE1 == 11) 
+			{ 
+				RECEIVE1 = 1;			
+				search_RECEIVE1 = 0;
+			}
+		}		
 	}
 }
