@@ -31,6 +31,7 @@
 #define CMD_HOST_INIT				0x01
 #define CMD_PAGE_PROG				0x02
 #define CMD_BOOT					0x03
+#define ERROR_PAGE					0xEE
 
 #define CAN_RESP_OK					0x01
 #define CAN_RESP_ERROR_CRC			0x02
@@ -144,7 +145,7 @@ int main(void)
 	Configure_USART1();
 	CRC_Init();
 	
-	delay_ms(500);
+	delay_ms(5000);
 
 	if (blState == WAIT_HOST) 
 	{
@@ -233,7 +234,13 @@ int main(void)
 			}
 		}
 
-		
+		if (blState == ERROR_PAGE) 
+		{
+			TransmitResponsePacket("$ER3");
+			blState = IDLE;
+			command = CMD_HOST_INIT;
+			delay_ms(100);
+		}
 		
 		if (blState == BOOT) 
 		{
@@ -518,9 +525,9 @@ __INLINE void Configure_USART1(void)
 	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
 
 	/* Configure USART1 */
-	/* (1) oversampling by 16, 9600 baud */
+	/* (1) 230400 baud */
 	/* (2) 8 data bit, 1 start bit, 1 stop bit, no parity, reception mode */
-	USART1->BRR = 480000 / 96; /* (1) */
+	USART1->BRR = 208; /* (1) */
 	USART1->CR1 = USART_CR1_RXNEIE | USART_CR1_RE | USART_CR1_UE; /* (2) */
 
 	/* Configure IT */
@@ -609,17 +616,24 @@ void USART1_IRQHandler(void)
 		}
 		if (search == 3) 
 		{ 
-			command = 0x01;	
+			command = CMD_HOST_INIT;
+			blState = IDLE;			
 			search = 0;			
 		}
 		
 		if (command == 0x00)
 		{
-			Data_CRC[crc_cnt++] = chartoreceive;
+			received_Page_bytes++;
+			if (received_Page_bytes > 3)
+			{
+				Data_CRC[crc_cnt++] = chartoreceive;	
+			}
+			
 			if (crc_cnt == 0x05)
 			{
 				command = CMD_PAGE_PROG;
 				crc_cnt = 0;
+				received_Page_bytes = 0;
 			}
 		}
 		
@@ -666,6 +680,7 @@ void USART1_IRQHandler(void)
 				if (size_of_Page > FLASH_PAGE_SIZE)
 				{
 					size_of_Page = 0;
+					blState = ERROR_PAGE;
 				}
 				RECEIVE1 = 0;
 				size_of_Page_parcel_cnt = 0;
